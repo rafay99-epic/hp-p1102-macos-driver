@@ -1,0 +1,12 @@
+{ NAME "Get-Jobs completed, needed attributes, newest 20"
+  OPERATION Get-Jobs
+  GROUP operation-attributes-tag
+  ATTR charset attributes-charset utf-8
+  ATTR naturalLanguage attributes-natural-language en
+  ATTR uri printer-uri $uri
+  ATTR name requesting-user-name $user
+  ATTR keyword which-jobs completed
+  ATTR integer limit 20
+  ATTR keyword requested-attributes job-id,job-name,job-state,job-media-sheets-completed,time-at-creation,time-at-completed
+  STATUS successful-ok
+  DISPLAY job-id }

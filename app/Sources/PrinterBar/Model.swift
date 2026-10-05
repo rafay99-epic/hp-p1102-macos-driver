@@ -60,6 +60,7 @@ final class AppModel {
     @ObservationIgnored private var stalled = false
     @ObservationIgnored private var quitTask: Task<Void, Never>?
     @ObservationIgnored private var refreshing = false
+    @ObservationIgnored private var readyMarked = false
     @ObservationIgnored private let prefs = UserDefaults.standard
 
     // MARK: Settings stored by the app
@@ -160,6 +161,9 @@ final class AppModel {
 
     func refresh() async {
         guard !refreshing else { return }
+        Perf.count("refresh")
+        let started = DispatchTime.now().uptimeNanoseconds
+        defer { Perf.count("refresh.us", Int((DispatchTime.now().uptimeNanoseconds - started) / 1000)) }
         refreshing = true
         defer { refreshing = false }
         let (p, a, d) = await Task.detached {
@@ -188,6 +192,7 @@ final class AppModel {
             }
         }
         if notifyProblems, !wasAttention, let problem = attention { notify("HP LaserJet P1102", problem) }
+        if !readyMarked { readyMarked = true; Perf.mark("ready") }
         if !active.isEmpty { quitTask?.cancel(); quitTask = nil }
         scheduleQuitIfIdle()
     }

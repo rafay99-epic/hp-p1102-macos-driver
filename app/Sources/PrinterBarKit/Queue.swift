@@ -76,6 +76,7 @@ public enum Queue {
 
     @discardableResult
     static func run(_ tool: String, _ args: String...) -> (ok: Bool, output: String) {
+        Perf.count("spawn.\((tool as NSString).lastPathComponent)\(args.first.map { " " + $0 } ?? "")")
         let p = Process()
         p.executableURL = URL(fileURLWithPath: tool)
         p.arguments = args

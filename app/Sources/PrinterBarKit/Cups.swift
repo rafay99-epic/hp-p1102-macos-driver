@@ -3,7 +3,8 @@ import Foundation
 
 /// Where the driver lives once installed. Must match driver/install.sh.
 public enum Driver {
-    public static let queue = "HP_LaserJet_P1102"
+    /// PRINTERBAR_QUEUE points the app at another queue (tools/perf uses a throwaway one).
+    public static let queue = ProcessInfo.processInfo.environment["PRINTERBAR_QUEUE"] ?? "HP_LaserJet_P1102"
     public static let encoder = "/Library/Printers/HP-P1102/bin/foo2zjs"
     public static let filter = "/Library/Printers/HP-P1102/filter/rastertozjs"
     public static let ppd = "/Library/Printers/PPDs/Contents/Resources/HP-LaserJet-P1102.ppd"
@@ -115,6 +116,14 @@ public enum Cups {
 
     // MARK: IPP plumbing
 
+    private static func addKeywords(_ req: OpaquePointer, _ name: String, _ values: [String]) {
+        let strings = values.map { strdup($0) }
+        defer { strings.forEach { free($0) } }
+        strings.map { UnsafePointer($0) }.withUnsafeBufferPointer { buf in
+            _ = ippAddStrings(req, IPP_TAG_OPERATION, IPP_TAG_KEYWORD, name, Int32(values.count), nil, buf.baseAddress)
+        }
+    }
+
     private static func jobOp(_ op: ipp_op_t, _ id: Int, _ extra: (OpaquePointer) -> Void = { _ in }) -> Bool {
         _ = request(op) { req in
             ippAddInteger(req, IPP_TAG_OPERATION, IPP_TAG_INTEGER, "job-id", Int32(id))
@@ -130,7 +139,7 @@ public enum Cups {
         ippAddString(req, IPP_TAG_OPERATION, IPP_TAG_URI, "printer-uri", nil, printerURI)
         ippAddString(req, IPP_TAG_OPERATION, IPP_TAG_NAME, "requesting-user-name", nil, cupsUser())
         configure(req)
-        guard let resp = cupsDoRequest(nil, req, "/") else { return [] }
+        guard let resp = Perf.time("ipp.\(String(cString: ippOpString(op)))", { cupsDoRequest(nil, req, "/") }) else { return [] }
         defer { ippDelete(resp) }
         guard ippGetStatusCode(resp).rawValue < 0x0100 else { return [] }
 

@@ -1,4 +1,5 @@
 import AppKit
+import PrinterBarKit
 import SwiftUI
 
 @MainActor
@@ -37,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
 
     private func trackIcon() {
         withObservationTracking {
+            Perf.count("icon.set")
             item.button?.image = model.status.icon.image
             item.button?.title = model.title
         } onChange: { [weak self] in

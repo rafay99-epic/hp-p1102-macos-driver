@@ -1,0 +1,14 @@
+{ NAME "Get-Notifications, wait for events"
+  OPERATION Get-Notifications
+  GROUP operation-attributes-tag
+  ATTR charset attributes-charset utf-8
+  ATTR naturalLanguage attributes-natural-language en
+  ATTR uri printer-uri $uri
+  ATTR name requesting-user-name $user
+  ATTR integer notify-subscription-ids $sub
+  ATTR integer notify-sequence-numbers $seq
+  ATTR boolean notify-wait true
+  STATUS successful-ok
+  DISPLAY notify-subscribed-event
+  DISPLAY notify-sequence-number
+  DISPLAY notify-get-interval }

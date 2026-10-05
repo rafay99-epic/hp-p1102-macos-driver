@@ -5,6 +5,7 @@ struct RootView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        let _ = Perf.count("body.root")
         VStack(alignment: .leading, spacing: 0) {
             switch model.screen {
             case .main: MainView()
