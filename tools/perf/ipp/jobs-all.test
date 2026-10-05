@@ -1,0 +1,10 @@
+{ NAME "Get-Jobs completed, all attributes"
+  OPERATION Get-Jobs
+  GROUP operation-attributes-tag
+  ATTR charset attributes-charset utf-8
+  ATTR naturalLanguage attributes-natural-language en
+  ATTR uri printer-uri $uri
+  ATTR name requesting-user-name $user
+  ATTR keyword which-jobs completed
+  ATTR keyword requested-attributes all
+  STATUS successful-ok }

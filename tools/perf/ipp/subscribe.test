@@ -1,0 +1,14 @@
+{ NAME "Create pull subscription"
+  OPERATION Create-Printer-Subscriptions
+  GROUP operation-attributes-tag
+  ATTR charset attributes-charset utf-8
+  ATTR naturalLanguage attributes-natural-language en
+  ATTR uri printer-uri $uri
+  ATTR name requesting-user-name $user
+  GROUP subscription-attributes-tag
+  ATTR keyword notify-pull-method ippget
+  ATTR keyword notify-events job-created,job-completed,job-state-changed,job-progress,printer-state-changed,printer-config-changed
+  ATTR integer notify-lease-duration 300
+  STATUS successful-ok
+  EXPECT notify-subscription-id OF-TYPE integer
+  DISPLAY notify-subscription-id }

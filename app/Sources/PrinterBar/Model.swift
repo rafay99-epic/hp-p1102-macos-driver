@@ -1,0 +1,440 @@
+import AppKit
+import Observation
+import PDFKit
+import PrinterBarKit
+import UniformTypeIdentifiers
+import UserNotifications
+
+enum Screen: Equatable {
+    case main, queue, settings, testPage, driver, duplex
+    case printFile([URL])
+}
+
+enum Status: Equatable {
+    case driverMissing, notConnected, ready, printing, paused, unplugged
+    case attention(String)
+
+    var icon: Icon {
+        switch self {
+        case .ready, .notConnected: .ready
+        case .printing: .printing
+        case .paused: .paused
+        case .attention, .driverMissing: .attention
+        case .unplugged: .held
+        }
+    }
+}
+
+struct DuplexRun: Equatable {
+    enum Phase: Equatable { case printingFront, reload, printingBack, calibrate, done }
+    var name: String
+    var paper: String
+    var sheets: Int
+    var phase: Phase
+    var frontJob: Int?
+    var backJob: Int?
+    var backFile: URL?
+    var calibrating: Bool
+}
+
+@MainActor @Observable
+final class AppModel {
+    var screen: Screen = .main
+    var connected = false
+    var printer: PrinterStatus?
+    var active: [Job] = []
+    var done: [Job] = []
+    var defaults = Queue.Defaults()
+    var duplex: DuplexRun?
+    var message: String?
+    var popoverOpen = false
+    var driverFilesPresent = Setup.driverFilesPresent
+
+    /// Page totals for jobs PrinterBar submitted. CUPS doesn't know the page
+    /// count of a job until it has printed, so "page 2 of 5" needs this.
+    var totals: [Int: Int] = [:]
+
+    @ObservationIgnored var showPopover: () -> Void = {}
+    @ObservationIgnored private var sawPrinter = false
+    @ObservationIgnored private var progress: (job: Int, sheets: Int, since: Date)?
+    @ObservationIgnored private var stalled = false
+    @ObservationIgnored private var quitTask: Task<Void, Never>?
+    @ObservationIgnored private var refreshing = false
+    @ObservationIgnored private var readyMarked = false
+    @ObservationIgnored private let prefs = UserDefaults.standard
+
+    // MARK: Settings stored by the app
+
+    var notifyFinish: Bool {
+        get { access(keyPath: \.notifyFinish); return prefs.bool(forKey: "notifyFinish") }
+        set { withMutation(keyPath: \.notifyFinish) { prefs.set(newValue, forKey: "notifyFinish") } }
+    }
+    var notifyProblems: Bool {
+        get { access(keyPath: \.notifyProblems); return prefs.object(forKey: "notifyProblems") as? Bool ?? true }
+        set { withMutation(keyPath: \.notifyProblems) { prefs.set(newValue, forKey: "notifyProblems") } }
+    }
+    var makeDefault: Bool {
+        get { access(keyPath: \.makeDefault); return prefs.object(forKey: "makeDefault") as? Bool ?? true }
+        set { withMutation(keyPath: \.makeDefault) { prefs.set(newValue, forKey: "makeDefault") } }
+    }
+    var openOnConnect: Bool {
+        get { access(keyPath: \.openOnConnect); return LaunchAgent.isEnabled }
+        set { withMutation(keyPath: \.openOnConnect) { newValue ? LaunchAgent.enable() : LaunchAgent.disable() } }
+    }
+
+    // MARK: Derived state
+
+    var driverInstalled: Bool { driverFilesPresent && printer != nil }
+
+    var status: Status {
+        if !driverInstalled { return .driverMissing }
+        if !connected { return active.isEmpty ? .notConnected : .unplugged }
+        if let problem = attention { return .attention(problem) }
+        if printer?.holdingNewJobs == true { return .paused }
+        if active.contains(where: { $0.state == .processing }) { return .printing }
+        return .ready
+    }
+
+    private var attention: String? {
+        if let p = printer?.problems.first {
+            return ["media-empty": "Out of paper", "media-needed": "Out of paper", "media-jam": "Paper jam",
+                    "door-open": "Front door open", "cover-open": "Front door open",
+                    "toner-empty": "Toner empty", "offline": "Printer offline"][p] ?? "Printer needs attention"
+        }
+        if printer?.state == .stopped { return "Printing stopped after an error" }
+        if stalled { return "No progress for 60 s" }
+        return nil
+    }
+
+    var current: Job? { active.first { $0.state == .processing } }
+    var waiting: [Job] { active.filter { $0.state != .processing } }
+
+    /// "2/5" next to the icon while printing.
+    var title: String {
+        guard let job = current else { return "" }
+        let page = job.sheetsDone + 1
+        return totals[job.id].map { "\(min(page, $0))/\($0)" } ?? "\(page)"
+    }
+
+    var pagesThisMonth: Int { prefs.integer(forKey: "pages.count") }
+
+    // MARK: Lifecycle
+
+    /// No timers while idle. CUPS on macOS posts Darwin notifications for every
+    /// job and queue change (mapped with tools/perf), so the app sleeps until
+    /// one arrives and cupsd is free to exit. The one poll is every 3 s while
+    /// a page is printing, because page progress posts nothing.
+    func start() {
+        // Turn on auto-launch the first time the app runs from /Applications.
+        if Bundle.main.bundlePath.hasPrefix("/Applications/"), !prefs.bool(forKey: "agentOffered") {
+            prefs.set(true, forKey: "agentOffered")
+            LaunchAgent.enable()
+        }
+        LaunchAgent.refreshIfMoved()
+        DarwinNotify.observe("com.apple.jobChange") { [weak self] in self?.setNeedsRefresh() }
+        DarwinNotify.observe("com.apple.printerHistoryChange") { [weak self] in self?.setNeedsRefresh() }
+        DarwinNotify.observe("com.apple.printerListChange") { [weak self] in self?.setNeedsRefresh(config: true) }
+        setNeedsRefresh(config: true)
+    }
+
+    func deviceChanged(_ present: Bool) {
+        connected = present
+        if present {
+            sawPrinter = true
+            quitTask?.cancel()
+            quitTask = nil
+            if makeDefault, printer != nil { Queue.makeDefaultPrinter() }
+        }
+        setNeedsRefresh()
+        scheduleQuitIfIdle()
+    }
+
+    /// Quits once the printer is gone and nothing is waiting for it. Only
+    /// after the printer was seen, so opening the app by hand with the
+    /// printer off still works.
+    private func scheduleQuitIfIdle() {
+        guard sawPrinter, !connected, active.isEmpty, duplex == nil, quitTask == nil else { return }
+        quitTask = Task {
+            try? await Task.sleep(for: .seconds(10))
+            guard !Task.isCancelled, !connected, active.isEmpty else { quitTask = nil; return }
+            NSApp.terminate(nil)
+        }
+    }
+
+    @ObservationIgnored private var scheduled: Task<Void, Never>?
+    @ObservationIgnored private var progressPoll: Task<Void, Never>?
+    @ObservationIgnored private var needsConfig = false
+    @ObservationIgnored private var needsHistory = false
+    @ObservationIgnored private var rerun = false
+
+    /// Coalesces bursts (one print posts several notifications) into one refresh.
+    /// `config` also re-checks the driver files; `history` also
+    /// fetches completed jobs.
+    func setNeedsRefresh(config: Bool = false, history: Bool = false) {
+        needsConfig = needsConfig || config
+        needsHistory = needsHistory || history
+        guard scheduled == nil else { return }
+        scheduled = Task {
+            try? await Task.sleep(for: .milliseconds(100))
+            scheduled = nil
+            await refresh()
+        }
+    }
+
+    private func refresh() async {
+        guard !refreshing else { rerun = true; return }
+        refreshing = true
+        Perf.count("refresh")
+        let started = DispatchTime.now().uptimeNanoseconds
+        let config = needsConfig
+        let editing = screen == .settings
+        needsConfig = false
+
+        let (p, a) = await Task.detached { (Cups.printer(), Cups.jobs(completed: false)) }.value
+        let finished = Set(active.map(\.id)).subtracting(a.map(\.id))
+        // Completed jobs are only shown in the popover and only change when a job ends.
+        let wantHistory = needsHistory || popoverOpen || !finished.isEmpty
+        needsHistory = false
+        let d = wantHistory ? await Task.detached { Cups.jobs(completed: true) }.value : nil
+
+        let wasAttention = attention != nil
+        // Assign only on change: every assignment to an observed property
+        // re-runs the menu bar icon update and invalidates the open popover.
+        let sorted = a.sorted { ($0.state == .processing ? 0 : 1, $0.id) < ($1.state == .processing ? 0 : 1, $1.id) }
+        if printer != p { printer = p }
+        if active != sorted { active = sorted }
+        if config, driverFilesPresent != Setup.driverFilesPresent { driverFilesPresent.toggle() }
+        // Never while Settings is open: it would overwrite an edit in flight.
+        if let p, !editing, p.defaults != defaults { defaults = p.defaults }
+        if let d {
+            let cleared = Set(prefs.array(forKey: "cleared") as? [Int] ?? [])
+            let today = d.filter { Calendar.current.isDateInToday($0.completed ?? $0.created) && !cleared.contains($0.id) }
+                .sorted { $0.id > $1.id }
+            if done != today { done = today }
+            countPages(d)
+            if notifyFinish {
+                for job in d where finished.contains(job.id) && job.state == .completed {
+                    notify("Printed \(job.name)", "")
+                }
+            }
+        }
+
+        trackProgress()
+        advanceDuplex()
+        if notifyProblems, !wasAttention, let problem = attention { notify("HP LaserJet P1102", problem) }
+        if !readyMarked { readyMarked = true; Perf.mark("ready") }
+        if !active.isEmpty { quitTask?.cancel(); quitTask = nil }
+        scheduleQuitIfIdle()
+        if connected, current != nil, progressPoll == nil {
+            progressPoll = Task {
+                try? await Task.sleep(for: .seconds(3), tolerance: .seconds(1))
+                progressPoll = nil
+                setNeedsRefresh()
+            }
+        }
+
+        Perf.count("refresh.us", Int((DispatchTime.now().uptimeNanoseconds - started) / 1000))
+        refreshing = false
+        if rerun { rerun = false; setNeedsRefresh() }
+    }
+
+    private func trackProgress() {
+        guard connected, let job = current else { progress = nil; stalled = false; return }
+        if progress?.job != job.id || progress?.sheets != job.sheetsDone {
+            progress = (job.id, job.sheetsDone, .now)
+            stalled = false
+        } else if let since = progress?.since {
+            stalled = Date.now.timeIntervalSince(since) > 60
+        }
+    }
+
+    /// Adds newly completed jobs to this month's page count. Writes to
+    /// UserDefaults (an IPC round trip to cfprefsd) only when something changed.
+    private func countPages(_ completed: [Job]) {
+        let cal = Calendar.current
+        let now = cal.dateComponents([.year, .month], from: .now)
+        let month = "\(now.year ?? 0)-\(now.month ?? 0)"
+        var counted = Set(prefs.array(forKey: "pages.counted") as? [Int] ?? [])
+        var total = prefs.integer(forKey: "pages.count")
+        var changed = false
+        if prefs.string(forKey: "pages.month") != month {
+            counted = []
+            total = 0
+            changed = true
+        }
+        for job in completed where job.state == .completed && !counted.contains(job.id) {
+            guard let at = job.completed, cal.isDate(at, equalTo: .now, toGranularity: .month) else { continue }
+            counted.insert(job.id)
+            total += job.sheetsDone
+            changed = true
+        }
+        guard changed else { return }
+        prefs.set(month, forKey: "pages.month")
+        prefs.set(total, forKey: "pages.count")
+        prefs.set(Array(counted), forKey: "pages.counted")
+    }
+
+    // MARK: Actions
+
+    struct PrintOptions {
+        var paper = "A4"
+        var copies = 1
+        var range = ""
+        var tonerSave = false
+    }
+
+    /// PDFs, images and text go straight to CUPS. Anything else (Word,
+    /// PowerPoint, Excel, Pages...) is handed to the app that opens it.
+    func print(_ urls: [URL], _ o: PrintOptions) {
+        var opts = ["PageSize": o.paper, "fit-to-page": "true", "copies": "\(o.copies)",
+                    "TonerSave": o.tonerSave ? "True" : "False"]
+        if !o.range.isEmpty { opts["page-ranges"] = o.range }
+        for url in urls {
+            if Setup.printsDirectly(url) {
+                do {
+                    let id = try Cups.submit(url, title: url.lastPathComponent, options: opts)
+                    if o.range.isEmpty, let n = Setup.pageCount(url) { totals[id] = n * o.copies }
+                } catch { flash("Couldn't print \(url.lastPathComponent): \(error.localizedDescription)") }
+            } else if let app = Setup.handOff(url) {
+                flash("Sent \(url.lastPathComponent) to \(app)")
+            } else {
+                flash("Opened \(url.lastPathComponent). Press ⌘P there to print.")
+            }
+        }
+        screen = .main
+        setNeedsRefresh()
+    }
+
+    func printTestPage(paper: String) {
+        guard let url = Bundle.main.url(forResource: "testpage-\(paper)", withExtension: "pdf") else {
+            return flash("Test page missing from the app bundle")
+        }
+        print([url], PrintOptions(paper: paper))
+    }
+
+    func cancel(_ job: Job) { Cups.cancel(job.id); setNeedsRefresh() }
+    func cancelAll() { active.forEach { Cups.cancel($0.id) }; setNeedsRefresh() }
+    func printNext(_ job: Job) { Cups.printNext(job.id); setNeedsRefresh() }
+    func reprint(_ job: Job) {
+        if !Cups.restart(job.id) { flash("CUPS no longer has that file") }
+        setNeedsRefresh()
+    }
+    func release(_ job: Job) { Cups.release(job.id); setNeedsRefresh() }
+
+    func togglePause() {
+        if status == .paused {
+            Queue.resume(held: active.filter { $0.state == .held }.map(\.id))
+        } else {
+            Queue.pause(waiting: active.filter { $0.state == .pending }.map(\.id))
+        }
+        setNeedsRefresh()
+    }
+
+    /// Resumes a queue CUPS stopped after an error; the stuck job starts over.
+    func tryAgain() {
+        Queue.enable()
+        stalled = false
+        progress = nil
+        setNeedsRefresh()
+    }
+
+    func clearDone() {
+        let cleared = (prefs.array(forKey: "cleared") as? [Int] ?? []) + done.map(\.id)
+        prefs.set(Array(cleared.suffix(500)), forKey: "cleared")
+        done = []
+    }
+
+    func saveDefaults() {
+        let d = defaults
+        Task.detached {
+            if !Queue.setDefaults(d) { await self.flash("Couldn't save defaults") }
+        }
+    }
+
+    func installDriver() {
+        do {
+            try Setup.installDriver()
+            Queue.extraQueues().forEach { _ = Queue.remove($0) }
+            flash("Driver installed")
+        } catch {
+            flash(error.localizedDescription)
+        }
+        setNeedsRefresh(config: true)
+    }
+
+    // MARK: Two-sided
+
+    /// Starts a two-sided run. A nil url prints the calibration sheet instead.
+    func startDuplex(_ url: URL?, paper: String) {
+        let calibrating = url == nil
+        do {
+            let dir = FileManager.default.temporaryDirectory.appendingPathComponent("PrinterBar-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let source = try url ?? Duplex.calibrationSheet(in: dir)
+            let split = try Duplex.split(source, settings: .load(), into: dir)
+            let opts = ["PageSize": paper, "fit-to-page": "true"]
+            let front = try Cups.submit(split.odd, title: "\(source.lastPathComponent) (front)", options: opts)
+            totals[front] = split.sheets
+            duplex = DuplexRun(name: source.lastPathComponent, paper: paper, sheets: split.sheets, phase: .printingFront,
+                               frontJob: front, backFile: split.even, calibrating: calibrating)
+            if split.even == nil { duplex?.phase = .printingBack; duplex?.backJob = front }
+            screen = .duplex
+        } catch {
+            flash(error.localizedDescription)
+        }
+    }
+
+    func printBacks() {
+        guard var run = duplex, let file = run.backFile else { return }
+        do {
+            let id = try Cups.submit(file, title: "\(run.name) (back)", options: ["PageSize": run.paper, "fit-to-page": "true"])
+            totals[id] = run.sheets
+            run.backJob = id
+            run.phase = .printingBack
+            duplex = run
+        } catch { flash(error.localizedDescription) }
+    }
+
+    func finishCalibration(_ order: Duplex.Settings.Order, upsideDown: Bool) {
+        var s = Duplex.Settings.load()
+        s.calibrate(order: order, upsideDown: upsideDown)
+        s.save()
+        duplex = nil
+        screen = .main
+        flash("Saved. Two-sided printing will use this from now on.")
+    }
+
+    private func advanceDuplex() {
+        guard var run = duplex else { return }
+        let activeIDs = Set(active.map(\.id))
+        switch run.phase {
+        case .printingFront where run.frontJob.map { !activeIDs.contains($0) } ?? false:
+            run.phase = .reload
+        case .printingBack where run.backJob.map { !activeIDs.contains($0) } ?? false:
+            run.phase = run.calibrating ? .calibrate : .done
+        default: return
+        }
+        duplex = run
+    }
+
+    // MARK: Messages
+
+    func flash(_ text: String) {
+        message = text
+        Task {
+            try? await Task.sleep(for: .seconds(6))
+            if message == text { message = nil }
+        }
+    }
+
+    private func notify(_ title: String, _ body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        Task {
+            let center = UNUserNotificationCenter.current()
+            guard (try? await center.requestAuthorization(options: [.alert])) == true else { return }
+            try? await center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+        }
+    }
+}

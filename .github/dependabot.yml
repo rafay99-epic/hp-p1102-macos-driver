@@ -1,0 +1,12 @@
+# Monthly PRs for new foo2zjs upstream commits and action versions.
+# CI runs the pipeline tests on each one before anything merges.
+version: 2
+updates:
+  - package-ecosystem: gitsubmodule
+    directory: /
+    schedule:
+      interval: monthly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+
+      - name: Build (universal, warnings are errors)
+        run: |
+          make
+          for f in build/foo2zjs build/rastertozjs; do
+            archs=$(lipo -archs "$f"); echo "$f: $archs"
+            case "$archs" in *arm64*x86_64*|*x86_64*arm64*) ;; *) exit 1 ;; esac
+          done
+
+      - name: Static analysis
+        run: make analyze
+
+      - name: Pipeline tests
+        run: make test
+
+      - name: Install
+        run: sudo make install
+
+      - name: Installed driver
+        run: |
+          PPD=/Library/Printers/PPDs/Contents/Resources/HP-LaserJet-P1102.ppd
+          cupstestppd -W translations "$PPD"
+          lpstat -p HP_LaserJet_P1102
+          PPD=$PPD driver/test/check.sh
+
+      - name: PrinterBar tests against the installed queue
+        run: make app-test
+
+      - name: Build PrinterBar.app and render every screen
+        run: |
+          make screens
+          test -x build/PrinterBar.app/Contents/MacOS/PrinterBar
+          ls docs/screens/*.png | wc -l | grep -qx ' *16'
+
+      - name: Uninstall
+        run: |
+          sudo make uninstall
+          test ! -e /Library/Printers/HP-P1102
+          ! lpstat -p HP_LaserJet_P1102 2>/dev/null
+
+      - name: Upload test output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-output
+          path: build/test
