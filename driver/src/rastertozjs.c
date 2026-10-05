@@ -1,11 +1,5 @@
-// rastertozjs: CUPS filter for the HP LaserJet Professional P1102 on macOS.
-//
-// macOS renders every job with Quartz (cgpdftoraster) into 8-bit grayscale
-// CUPS raster. This filter halftones each page to 1 bit, wraps it as PBM and
-// pipes it into foo2zjs, which encodes the ZjStream the printer speaks.
-// No Ghostscript involved, so nothing outside the CUPS sandbox is needed.
-//
-// Usage (called by CUPS): rastertozjs job user title copies options [file]
+// CUPS filter: Quartz 8-bit gray raster -> 1-bit PBM -> foo2zjs -z2 (ZjStream).
+// Uses no Ghostscript, so it runs inside the CUPS sandbox.
 
 #include <cups/cups.h>
 #include <cups/raster.h>
@@ -30,7 +24,7 @@ extern char **environ;
 
 typedef struct { const char *name; int w, h, code; } Paper;
 
-// Page sizes in points mapped to the P1102 (-z2) paper codes.
+// Page sizes in points -> P1102 (-z2) paper codes.
 static const Paper papers[] = {
   {"Letter", 612, 792, 1},       {"Legal", 612, 1008, 5},
   {"Executive", 522, 756, 7},    {"A4", 595, 842, 9},
@@ -64,8 +58,8 @@ static int media_code(const cups_page_header2_t *h) {
   return 1;
 }
 
-// Clustered-dot threshold cell (round dot spot function, 75 lpi at 600 dpi).
-// Laser engines hold clustered dots far better than dispersed dither.
+// 75 lpi clustered-dot screen. Laser engines hold clustered dots far better
+// than dispersed dither.
 static unsigned char thresh[CELL][CELL];
 
 static void build_screen(void) {
@@ -76,7 +70,6 @@ static void build_screen(void) {
     spot[i] = cos(M_PI * x) + cos(M_PI * y);
     order[i] = i;
   }
-  // Insertion sort: highest spot value (dot centre) darkens first.
   for (int i = 1; i < CELL * CELL; i++)
     for (int j = i; j > 0 && spot[order[j]] > spot[order[j - 1]]; j--) {
       int t = order[j]; order[j] = order[j - 1]; order[j - 1] = t;
@@ -86,10 +79,8 @@ static void build_screen(void) {
         (unsigned char)((rank * 255 + 127) / (CELL * CELL));
 }
 
-// cgpdftoraster only renders the PPD ImageableArea (96px in from each edge),
-// which is exactly what foo2zjs -z2 would otherwise clip, so no -u/-l here.
-// Spawns foo2zjs with stdout inherited (goes to the backend). Returns the
-// write end of its stdin.
+// cgpdftoraster already crops to the PPD ImageableArea (96px per edge), so
+// passing -u/-l here would clip the page twice.
 static FILE *spawn_foo2zjs(const cups_page_header2_t *h, int density, int draft,
                            pid_t *pid) {
   char geom[32], paper[16], media[16], dens[8];
@@ -129,12 +120,11 @@ static FILE *spawn_foo2zjs(const cups_page_header2_t *h, int density, int draft,
   return fdopen(fds[1], "w");
 }
 
-// Converts one raster line to packed 1-bit PBM (1 = black).
 static void halftone_line(const cups_page_header2_t *h, const unsigned char *in,
                           unsigned char *out, unsigned y) {
   size_t bpl = (h->cupsWidth + 7) / 8;
   memset(out, 0, bpl);
-  // CUPS_CSPACE_K stores ink (255 = black); W/SW store luminance.
+  // CUPS_CSPACE_K stores ink (255 = black); W/SW store light.
   int ink = h->cupsColorSpace == CUPS_CSPACE_K;
   const unsigned char *row = thresh[y % CELL];
   for (unsigned x = 0; x < h->cupsWidth; x++) {
@@ -171,8 +161,7 @@ int main(int argc, char *argv[]) {
       failed = 1;
       break;
     }
-    // PPD options arrive via setpagedevice: cupsInteger0 = density (1-5),
-    // cupsInteger1 = toner save.
+    // Set by the PPD: cupsInteger0 = Density (1-5), cupsInteger1 = TonerSave.
     int density = h.cupsInteger[0] >= 1 && h.cupsInteger[0] <= 5 ? (int)h.cupsInteger[0] : 3;
     if (!zjs && !(zjs = spawn_foo2zjs(&h, density, h.cupsInteger[1] != 0, &pid))) {
       failed = 1;

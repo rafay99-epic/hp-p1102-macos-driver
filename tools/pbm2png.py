@@ -1,4 +1,4 @@
-# Converts a (multi-page) PBM P4 stream to PNGs for eyeballing filter output.
+# Converts a multi-page PBM (P4) stream to downscaled PNGs for previewing filter output.
 # Usage: python3 tools/pbm2png.py in.pbm out-prefix [scale]
 import sys, zlib, struct
 
@@ -18,7 +18,6 @@ while pos < len(data):
     w, h = int(tok[1]), int(tok[2]); bpl = (w + 7) // 8
     rows = [data[pos + y * bpl: pos + (y + 1) * bpl] for y in range(h)]
     pos += bpl * h; page += 1
-    # Box-downsample to gray so a 600dpi page is viewable.
     ow, oh = w // scale, h // scale
     raw = bytearray()
     for oy in range(oh):
