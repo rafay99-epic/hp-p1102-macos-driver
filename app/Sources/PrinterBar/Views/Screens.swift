@@ -137,6 +137,9 @@ struct SettingsView: View {
 struct TestPageView: View {
     @Environment(AppModel.self) private var model
     @State private var paper = "A4"
+    /// Rendering the thumbnail takes ~8 ms, so it's done once per paper size,
+    /// not on every view update.
+    @State private var thumbnail = Self.thumbnail("A4")
 
     var body: some View {
         Header("Test Page") { model.screen = .main }
@@ -152,9 +155,10 @@ struct TestPageView: View {
         Sep()
         Action("Print Test Page", "↩", key: .return, modifiers: [], prominent: true) { model.printTestPage(paper: paper) }
             .onAppear { paper = model.defaults.paper }
+            .onChange(of: paper) { _, p in thumbnail = Self.thumbnail(p) }
     }
 
-    private var thumbnail: NSImage? {
+    private static func thumbnail(_ paper: String) -> NSImage? {
         Bundle.main.url(forResource: "testpage-\(paper)", withExtension: "pdf")
             .flatMap(PDFDocument.init(url:))?.page(at: 0)?.thumbnail(of: NSSize(width: 220, height: 300), for: .mediaBox)
     }

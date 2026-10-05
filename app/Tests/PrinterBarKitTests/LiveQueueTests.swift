@@ -34,14 +34,14 @@ final class LiveQueueTests: XCTestCase {
         XCTAssertEqual(Cups.jobs(completed: true).first { $0.id == id }?.state, .canceled)
     }
 
-    func testDefaultsRoundTrip() {
-        let before = Queue.defaults()
+    func testDefaultsRoundTrip() throws {
+        let before = try XCTUnwrap(Cups.printer()).defaults
         var changed = before
         changed.paper = "Legal"
         changed.density = "5"
         changed.tonerSave = true
         XCTAssertTrue(Queue.setDefaults(changed))
-        XCTAssertEqual(Queue.defaults(), changed)
+        XCTAssertEqual(Cups.printer()?.defaults, changed)
         XCTAssertTrue(Queue.setDefaults(before))
     }
 

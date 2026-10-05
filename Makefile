@@ -14,7 +14,7 @@ B        := build
 APP      := $(B)/PrinterBar.app
 SWIFTFLAGS := -c release --arch arm64 --arch x86_64 --package-path app
 
-.PHONY: all help test analyze install uninstall print-test app app-test install-app screens clean
+.PHONY: all help test analyze install uninstall print-test app app-test install-app screens perf perf-lifecycle bench clean
 
 all: $(B)/foo2zjs $(B)/rastertozjs ## Build universal (arm64 + x86_64) binaries
 
@@ -79,6 +79,15 @@ install-app: app ## Copy PrinterBar.app to /Applications and open it
 
 screens: app ## Render every PrinterBar screen to docs/screens
 	$(APP)/Contents/MacOS/PrinterBar --render-screens $(CURDIR)/docs/screens
+
+perf: app ## Measure PrinterBar: CPU, memory, CUPS requests (throwaway queue, ~4 min)
+	tools/perf/perf.sh
+
+perf-lifecycle: app ## Check cupsd can exit, popover memory, launch time (~4 min)
+	tools/perf/lifecycle.sh
+
+bench: ## Time the driver filter on a 10-page job and hash its output
+	tools/perf/filter-bench.sh
 
 clean: ## Remove build output
 	rm -rf $(B) app/.build

@@ -120,6 +120,10 @@ final class AppModel {
 
     // MARK: Lifecycle
 
+    /// No timers while idle. CUPS on macOS posts Darwin notifications for every
+    /// job and queue change (mapped with tools/perf), so the app sleeps until
+    /// one arrives and cupsd is free to exit. The one poll is every 3 s while
+    /// a page is printing, because page progress posts nothing.
     func start() {
         // Turn on auto-launch the first time the app runs from /Applications.
         if Bundle.main.bundlePath.hasPrefix("/Applications/"), !prefs.bool(forKey: "agentOffered") {
@@ -127,12 +131,10 @@ final class AppModel {
             LaunchAgent.enable()
         }
         LaunchAgent.refreshIfMoved()
-        Task {
-            while !Task.isCancelled {
-                await refresh()
-                try? await Task.sleep(for: .seconds(popoverOpen || !active.isEmpty || duplex != nil ? 2 : 10))
-            }
-        }
+        DarwinNotify.observe("com.apple.jobChange") { [weak self] in self?.setNeedsRefresh() }
+        DarwinNotify.observe("com.apple.printerHistoryChange") { [weak self] in self?.setNeedsRefresh() }
+        DarwinNotify.observe("com.apple.printerListChange") { [weak self] in self?.setNeedsRefresh(config: true) }
+        setNeedsRefresh(config: true)
     }
 
     func deviceChanged(_ present: Bool) {
@@ -143,7 +145,7 @@ final class AppModel {
             quitTask = nil
             if makeDefault, printer != nil { Queue.makeDefaultPrinter() }
         }
-        Task { await refresh() }
+        setNeedsRefresh()
         scheduleQuitIfIdle()
     }
 
@@ -159,42 +161,81 @@ final class AppModel {
         }
     }
 
-    func refresh() async {
-        guard !refreshing else { return }
+    @ObservationIgnored private var scheduled: Task<Void, Never>?
+    @ObservationIgnored private var progressPoll: Task<Void, Never>?
+    @ObservationIgnored private var needsConfig = false
+    @ObservationIgnored private var needsHistory = false
+    @ObservationIgnored private var rerun = false
+
+    /// Coalesces bursts (one print posts several notifications) into one refresh.
+    /// `config` also re-checks the driver files; `history` also
+    /// fetches completed jobs.
+    func setNeedsRefresh(config: Bool = false, history: Bool = false) {
+        needsConfig = needsConfig || config
+        needsHistory = needsHistory || history
+        guard scheduled == nil else { return }
+        scheduled = Task {
+            try? await Task.sleep(for: .milliseconds(100))
+            scheduled = nil
+            await refresh()
+        }
+    }
+
+    private func refresh() async {
+        guard !refreshing else { rerun = true; return }
+        refreshing = true
         Perf.count("refresh")
         let started = DispatchTime.now().uptimeNanoseconds
-        defer { Perf.count("refresh.us", Int((DispatchTime.now().uptimeNanoseconds - started) / 1000)) }
-        refreshing = true
-        defer { refreshing = false }
-        let (p, a, d) = await Task.detached {
-            (Cups.printer(), Cups.jobs(completed: false), Cups.jobs(completed: true))
-        }.value
-        let wasAttention = attention != nil
-        let finished = Set(active.map(\.id)).subtracting(a.map(\.id))
+        let config = needsConfig
+        let editing = screen == .settings
+        needsConfig = false
 
-        printer = p
-        active = a.sorted { ($0.state == .processing ? 0 : 1, $0.id) < ($1.state == .processing ? 0 : 1, $1.id) }
-        let cleared = Set(prefs.array(forKey: "cleared") as? [Int] ?? [])
-        done = d.filter { Calendar.current.isDateInToday($0.completed ?? $0.created) && !cleared.contains($0.id) }
-            .sorted { $0.id > $1.id }
-        driverFilesPresent = Setup.driverFilesPresent
+        let (p, a) = await Task.detached { (Cups.printer(), Cups.jobs(completed: false)) }.value
+        let finished = Set(active.map(\.id)).subtracting(a.map(\.id))
+        // Completed jobs are only shown in the popover and only change when a job ends.
+        let wantHistory = needsHistory || popoverOpen || !finished.isEmpty
+        needsHistory = false
+        let d = wantHistory ? await Task.detached { Cups.jobs(completed: true) }.value : nil
+
+        let wasAttention = attention != nil
+        // Assign only on change: every assignment to an observed property
+        // re-runs the menu bar icon update and invalidates the open popover.
+        let sorted = a.sorted { ($0.state == .processing ? 0 : 1, $0.id) < ($1.state == .processing ? 0 : 1, $1.id) }
+        if printer != p { printer = p }
+        if active != sorted { active = sorted }
+        if config, driverFilesPresent != Setup.driverFilesPresent { driverFilesPresent.toggle() }
         // Never while Settings is open: it would overwrite an edit in flight.
-        if p != nil, screen != .settings {
-            defaults = await Task.detached { Queue.defaults() }.value
+        if let p, !editing, p.defaults != defaults { defaults = p.defaults }
+        if let d {
+            let cleared = Set(prefs.array(forKey: "cleared") as? [Int] ?? [])
+            let today = d.filter { Calendar.current.isDateInToday($0.completed ?? $0.created) && !cleared.contains($0.id) }
+                .sorted { $0.id > $1.id }
+            if done != today { done = today }
+            countPages(d)
+            if notifyFinish {
+                for job in d where finished.contains(job.id) && job.state == .completed {
+                    notify("Printed \(job.name)", "")
+                }
+            }
         }
 
         trackProgress()
-        countPages(d)
         advanceDuplex()
-        if notifyFinish {
-            for job in d where finished.contains(job.id) && job.state == .completed {
-                notify("Printed \(job.name)", "")
-            }
-        }
         if notifyProblems, !wasAttention, let problem = attention { notify("HP LaserJet P1102", problem) }
         if !readyMarked { readyMarked = true; Perf.mark("ready") }
         if !active.isEmpty { quitTask?.cancel(); quitTask = nil }
         scheduleQuitIfIdle()
+        if connected, current != nil, progressPoll == nil {
+            progressPoll = Task {
+                try? await Task.sleep(for: .seconds(3), tolerance: .seconds(1))
+                progressPoll = nil
+                setNeedsRefresh()
+            }
+        }
+
+        Perf.count("refresh.us", Int((DispatchTime.now().uptimeNanoseconds - started) / 1000))
+        refreshing = false
+        if rerun { rerun = false; setNeedsRefresh() }
     }
 
     private func trackProgress() {
@@ -207,20 +248,28 @@ final class AppModel {
         }
     }
 
+    /// Adds newly completed jobs to this month's page count. Writes to
+    /// UserDefaults (an IPC round trip to cfprefsd) only when something changed.
     private func countPages(_ completed: [Job]) {
-        let month = Date.now.formatted(.dateTime.year().month(.twoDigits))
-        if prefs.string(forKey: "pages.month") != month {
-            prefs.set(month, forKey: "pages.month")
-            prefs.set(0, forKey: "pages.count")
-            prefs.set([Int](), forKey: "pages.counted")
-        }
+        let cal = Calendar.current
+        let now = cal.dateComponents([.year, .month], from: .now)
+        let month = "\(now.year ?? 0)-\(now.month ?? 0)"
         var counted = Set(prefs.array(forKey: "pages.counted") as? [Int] ?? [])
         var total = prefs.integer(forKey: "pages.count")
-        for job in completed where job.state == .completed && !counted.contains(job.id)
-            && (job.completed ?? .distantPast).formatted(.dateTime.year().month(.twoDigits)) == month {
+        var changed = false
+        if prefs.string(forKey: "pages.month") != month {
+            counted = []
+            total = 0
+            changed = true
+        }
+        for job in completed where job.state == .completed && !counted.contains(job.id) {
+            guard let at = job.completed, cal.isDate(at, equalTo: .now, toGranularity: .month) else { continue }
             counted.insert(job.id)
             total += job.sheetsDone
+            changed = true
         }
+        guard changed else { return }
+        prefs.set(month, forKey: "pages.month")
         prefs.set(total, forKey: "pages.count")
         prefs.set(Array(counted), forKey: "pages.counted")
     }
@@ -253,7 +302,7 @@ final class AppModel {
             }
         }
         screen = .main
-        Task { await refresh() }
+        setNeedsRefresh()
     }
 
     func printTestPage(paper: String) {
@@ -263,14 +312,14 @@ final class AppModel {
         print([url], PrintOptions(paper: paper))
     }
 
-    func cancel(_ job: Job) { Cups.cancel(job.id); Task { await refresh() } }
-    func cancelAll() { active.forEach { Cups.cancel($0.id) }; Task { await refresh() } }
-    func printNext(_ job: Job) { Cups.printNext(job.id); Task { await refresh() } }
+    func cancel(_ job: Job) { Cups.cancel(job.id); setNeedsRefresh() }
+    func cancelAll() { active.forEach { Cups.cancel($0.id) }; setNeedsRefresh() }
+    func printNext(_ job: Job) { Cups.printNext(job.id); setNeedsRefresh() }
     func reprint(_ job: Job) {
         if !Cups.restart(job.id) { flash("CUPS no longer has that file") }
-        Task { await refresh() }
+        setNeedsRefresh()
     }
-    func release(_ job: Job) { Cups.release(job.id); Task { await refresh() } }
+    func release(_ job: Job) { Cups.release(job.id); setNeedsRefresh() }
 
     func togglePause() {
         if status == .paused {
@@ -278,7 +327,7 @@ final class AppModel {
         } else {
             Queue.pause(waiting: active.filter { $0.state == .pending }.map(\.id))
         }
-        Task { await refresh() }
+        setNeedsRefresh()
     }
 
     /// Resumes a queue CUPS stopped after an error; the stuck job starts over.
@@ -286,7 +335,7 @@ final class AppModel {
         Queue.enable()
         stalled = false
         progress = nil
-        Task { await refresh() }
+        setNeedsRefresh()
     }
 
     func clearDone() {
@@ -310,7 +359,7 @@ final class AppModel {
         } catch {
             flash(error.localizedDescription)
         }
-        Task { await refresh() }
+        setNeedsRefresh(config: true)
     }
 
     // MARK: Two-sided

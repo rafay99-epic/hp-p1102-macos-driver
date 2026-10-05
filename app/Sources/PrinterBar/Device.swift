@@ -1,6 +1,18 @@
 import Foundation
 import IOKit
 import XPC
+import notify
+
+/// Darwin notifications (notify(3)). CUPS on macOS posts com.apple.jobChange,
+/// com.apple.printerHistoryChange and com.apple.printerListChange; it does not
+/// support IPP subscriptions (Create-Printer-Subscriptions is rejected).
+@MainActor
+enum DarwinNotify {
+    static func observe(_ name: String, _ handler: @escaping @MainActor () -> Void) {
+        var token: Int32 = 0
+        notify_register_dispatch(name, &token, .main) { _ in MainActor.assumeIsolated { handler() } }
+    }
+}
 
 /// Reports when a P1102 appears on or leaves USB. The printer drops off USB
 /// when it is switched off, so "present" means plugged in and powered on.

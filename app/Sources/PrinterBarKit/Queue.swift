@@ -1,3 +1,4 @@
+import CCups
 import Foundation
 
 /// Queue settings changed through the CUPS command line tools. Admin users
@@ -13,11 +14,6 @@ public enum Queue {
 
     public static let papers = ["A4", "Letter", "Legal"]
     public static let mediaTypes = ["Plain", "Light", "Heavy", "Recycled", "Rough", "Labels", "Envelope", "Transparency"]
-
-    /// The queue's current defaults. These are what every app's print dialog starts with.
-    public static func defaults() -> Defaults {
-        parseDefaults(run("/usr/bin/lpoptions", "-p", Driver.queue, "-l").output)
-    }
 
     public static func setDefaults(_ d: Defaults) -> Bool {
         run("/usr/sbin/lpadmin", "-p", Driver.queue,
@@ -40,7 +36,10 @@ public enum Queue {
     /// Restarts a queue CUPS stopped after a backend error.
     public static func enable() { run("/usr/sbin/cupsenable", Driver.queue) }
 
-    public static func makeDefaultPrinter() { run("/usr/sbin/lpadmin", "-d", Driver.queue) }
+    public static func makeDefaultPrinter() {
+        guard cupsGetDefault().map({ String(cString: $0) }) != Driver.queue else { return }
+        run("/usr/sbin/lpadmin", "-d", Driver.queue)
+    }
 
     /// Other queues pointing at the P1102, e.g. one macOS added by itself.
     public static func extraQueues() -> [String] {
@@ -54,25 +53,6 @@ public enum Queue {
     }
 
     public static func remove(_ queue: String) -> Bool { run("/usr/sbin/lpadmin", "-x", queue).ok }
-
-    /// Parses `lpoptions -l` lines like "PageSize/Paper Size: Letter Legal *A4".
-    static func parseDefaults(_ text: String) -> Defaults {
-        var d = Defaults()
-        for line in text.split(separator: "\n") {
-            guard let colon = line.firstIndex(of: ":") else { continue }
-            let key = line[..<colon].split(separator: "/").first.map(String.init) ?? ""
-            guard let value = line[line.index(after: colon)...].split(separator: " ")
-                .first(where: { $0.hasPrefix("*") })?.dropFirst() else { continue }
-            switch key {
-            case "PageSize": d.paper = String(value)
-            case "MediaType": d.mediaType = String(value)
-            case "Density": d.density = String(value)
-            case "TonerSave": d.tonerSave = value == "True"
-            default: break
-            }
-        }
-        return d
-    }
 
     @discardableResult
     static func run(_ tool: String, _ args: String...) -> (ok: Bool, output: String) {

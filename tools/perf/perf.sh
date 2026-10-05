@@ -36,15 +36,15 @@ cancel -a "$Q"
 secs() { awk -F: '{ if (NF == 2) print $1 * 60 + $2; else print $1 }'; }
 cpu_of() { ps -o time= -p "$1" 2>/dev/null | secs || echo 0; }
 cupsd_cpu() { local p; p=$(pgrep -x cupsd || true); [ -n "$p" ] && cpu_of "$p" || echo 0; }
-ms() { echo "($1) * 1000 / 1" | bc; }
+ms() { awk "BEGIN { printf \"%d\", ($1) * 1000 }"; }
 
 # app_ms: the app's own CPU during the measured window (launch excluded)
 # child_ms: CPU of processes the app spawned (whole run)
-# cupsd_ms: CPU cupsd spent during the window
+# cupsd_ms: CPU cupsd spent during the window; cupsd: still running at the end
 # ctxsw: voluntary context switches (whole run), a proxy for wakeups
 # Minstr: millions of instructions retired by the app and its children (whole run)
 echo "load average: $(sysctl -n vm.loadavg)  app: $APP"
-printf '\n%-9s %7s %8s %8s %7s %6s %7s %8s %4s %7s %5s %5s %7s %5s\n' scenario app_ms child_ms cupsd_ms Minstr ctxsw footpr peak_ft thr launch ipp spawn refresh views
+printf '\n%-9s %7s %8s %8s %6s %7s %6s %7s %8s %4s %7s %5s %5s %7s %5s\n' scenario app_ms child_ms cupsd_ms cupsd Minstr ctxsw footpr peak_ft thr launch ipp spawn refresh views
 run() { # name, setup command
   local name=$1 setup=$2 start ready app c0 c1 a0 a1
   eval "$setup"
@@ -56,6 +56,7 @@ run() { # name, setup command
   c0=$(cupsd_cpu); a0=$(cpu_of "$app")
   sleep "$DUR"
   c1=$(cupsd_cpu); a1=$(cpu_of "$app")
+  local up; up=$(pgrep -x cupsd > /dev/null && echo up || echo exited)
   local foot thr
   foot=$(footprint -p "$app" 2>/dev/null | awk '/phys_footprint:/ {print $2 $3; exit}')
   thr=$(($(ps -M -p "$app" | wc -l) - 1))
@@ -71,8 +72,8 @@ run() { # name, setup command
   local instr; instr=$(awk '/instructions retired/ {printf "%d", $1 / 1000000}' "$f")
   refresh=$(awk '$2 == "refresh" {print $3}' "$f")
   views=$(awk '$2 == "body.root" {print $3}' "$f")
-  printf '%-9s %7s %8s %8s %7s %6s %7s %8s %4s %7s %5s %5s %7s %5s\n' "$name" "$(ms "$a1 - $a0")" \
-    "$(ms "$total - $a1")" "$(ms "$c1 - $c0")" "$instr" "$ctx" "$foot" "$peak" "$thr" "$launch" \
+  printf '%-9s %7s %8s %8s %6s %7s %6s %7s %8s %4s %7s %5s %5s %7s %5s\n' "$name" "$(ms "$a1 - $a0")" \
+    "$(ms "$total - $a1")" "$(ms "($c1 < $c0) ? $c1 : $c1 - $c0")" "$up" "$instr" "$ctx" "$foot" "$peak" "$thr" "$launch" \
     "$ipp" "$spawn" "${refresh:-0}" "${views:-0}"
 }
 

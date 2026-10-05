@@ -46,19 +46,3 @@ final class DuplexTests: XCTestCase {
         XCTAssertEqual(even.page(at: 0)?.rotation, 180)
     }
 }
-
-final class QueueTests: XCTestCase {
-    func testParsesStarredDefaults() {
-        let d = Queue.parseDefaults("""
-        PageSize/Paper Size: Letter *Legal A4
-        MediaType/Paper Type: Plain *Heavy
-        Density/Print Density: 1 2 3 *4 5
-        TonerSave/Toner Save: False *True
-        Resolution/Resolution: *600dpi
-        """)
-        XCTAssertEqual(d.paper, "Legal")
-        XCTAssertEqual(d.mediaType, "Heavy")
-        XCTAssertEqual(d.density, "4")
-        XCTAssertTrue(d.tonerSave)
-    }
-}

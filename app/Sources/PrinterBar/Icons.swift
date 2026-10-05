@@ -5,10 +5,14 @@ import AppKit
 enum Icon: CaseIterable {
     case ready, printing, paused, attention, held
 
-    var image: NSImage {
+    /// Drawn once per state, not on every status change.
+    var image: NSImage { Self.cache[self]! }
+    private static let cache = Dictionary(uniqueKeysWithValues: allCases.map { ($0, $0.draw()) })
+
+    private func draw() -> NSImage {
         let img = NSImage(size: NSSize(width: 18, height: 18), flipped: true) { _ in
             NSColor.black.set()
-            draw()
+            paint()
             return true
         }
         img.isTemplate = true
@@ -16,7 +20,7 @@ enum Icon: CaseIterable {
         return img
     }
 
-    private func draw() {
+    private func paint() {
         let top = NSBezierPath(rect: NSRect(x: 5, y: 2, width: 8, height: 4))
         let body = NSBezierPath(roundedRect: NSRect(x: 2, y: 6, width: 14, height: 7), xRadius: 1.5, yRadius: 1.5)
         let paper = NSRect(x: 5, y: 11, width: 8, height: 5)

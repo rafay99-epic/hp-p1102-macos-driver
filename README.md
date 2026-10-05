@@ -118,6 +118,9 @@ connects** in its settings.
 | `make install-app` | Copy PrinterBar to `/Applications` and open it |
 | `make app-test` | Run PrinterBar's unit tests |
 | `make screens` | Render every PrinterBar screen to `docs/screens` |
+| `make perf` | Measure PrinterBar's CPU, memory and CUPS traffic (see [Performance](#performance)) |
+| `make perf-lifecycle` | Check that cupsd can sleep, popover memory, and launch time |
+| `make bench` | Time the driver filter and hash its output |
 | `make help` | List all targets |
 
 ## How it works
@@ -139,6 +142,51 @@ Nothing else is needed at print time: no Ghostscript, no Homebrew.
 PrinterBar never touches the driver directly. It only talks to the CUPS queue,
 so the driver works without the app, and the app shows "Driver missing"
 without the driver.
+
+## Performance
+
+PrinterBar sits in the menu bar for as long as the printer is on, so it has to
+cost close to nothing. It doesn't poll: CUPS on macOS posts a system
+notification (`com.apple.jobChange`, `com.apple.printerHistoryChange`,
+`com.apple.printerListChange`) for every job and queue change, and the app
+sleeps until one arrives. The only timer is a 3 second check while a page is
+printing, because page progress posts nothing. Everything it shows comes from
+one or two small IPP requests, never a spawned command line tool.
+
+Measured with `make perf` over 60 seconds per scenario, with 500 finished jobs
+in the queue history, before and after the performance pass:
+
+| | idle | jobs waiting | popover open |
+|---|---|---|---|
+| CUPS requests | 24 → 4 | 72 → 4 | 21 → 5 |
+| Processes spawned | 8 → 0 | 24 → 0 | 7 → 0 |
+| CPU instructions (millions) | 5,083 → 1,503 | 7,414 → 1,256 | 4,648 → 1,757 |
+| Memory footprint | 21 → 13 MB | 16 → 13 MB | 21 → 20 MB |
+
+The driver filter uses about 42 ms of CPU and 1.4 MB of memory per page; the
+printer takes about 3.3 s to print one, so the filter is idle 99% of a job.
+
+### Measuring it yourself
+
+The tools work for a person or a coding agent: run them, read the table, change
+something, run them again. None of them prints anything or touches your real
+queue: they create a stopped throwaway queue, `PrinterBar_Perf`, and delete it
+when they finish.
+
+| Tool | What it answers |
+|---|---|
+| `make perf` (`tools/perf/perf.sh [seconds] [history jobs]`) | Per scenario (idle, jobs waiting, popover open): the app's CPU, CPU of processes it spawned, cupsd CPU, instructions retired, context switches, memory footprint, threads, launch time, IPP requests, spawns, refreshes and view updates. `APP=path/to/PrinterBar` compares another build. |
+| `make perf-lifecycle` (`tools/perf/lifecycle.sh`) | Does cupsd get to exit while the app idles? Does memory grow over 25 popover open/close cycles? Median launch time over 5 runs. Needs Accessibility access for the terminal, to click the menu bar item. |
+| `make bench` (`tools/perf/filter-bench.sh [runs]`) | CPU time of the driver filter on a 10-page A4 job, plus SHA-256 hashes of its output, so a faster filter can be checked for byte-identical results. |
+| `tools/perf/ipp/*.test` | `ipptool` scripts for the CUPS questions behind the design, e.g. `ipptool -t ipp://localhost/printers/HP_LaserJet_P1102 tools/perf/ipp/jobs-all.test` vs `jobs-lean.test` shows why the app asks for 7 job attributes instead of all of them (about 130 ms vs 17 ms with a 500-job history). `subscribe.test` shows CUPS on macOS rejects IPP event subscriptions, which is why the app uses system notifications. |
+
+Setting `PRINTERBAR_PERF=1` turns on the app's internal counters, printed to
+stderr when it receives SIGTERM; `PRINTERBAR_QUEUE=name` points it at another
+queue. Both are off in normal use and cost nothing.
+
+Wall-clock numbers (launch time, CPU milliseconds) swing with whatever else the
+Mac is doing. Request, spawn and refresh counts, instructions retired and
+context switches don't, so compare those.
 
 ## Troubleshooting
 
@@ -175,6 +223,7 @@ app/Sources/PrinterBarKit/     CUPS access, queue settings, two-sided logic (tes
 app/Sources/PrinterBar/        menu bar app: USB watcher, launch agent, screens
 vendor/foo2zjs/                ZjStream encoder (git submodule, unmodified)
 tools/                         test page generator, PBM preview tool
+tools/perf/                    performance harness, lifecycle checks, filter benchmark
 ```
 
 CI builds everything for both architectures, runs the analyzer and both test

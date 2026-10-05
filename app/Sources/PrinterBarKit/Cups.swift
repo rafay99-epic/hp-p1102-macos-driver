@@ -37,9 +37,10 @@ public struct PrinterStatus: Equatable, Sendable {
     public let state: State
     public let reasons: [String]
     public let message: String
+    public let defaults: Queue.Defaults
 
-    public init(state: State, reasons: [String], message: String) {
-        self.state = state; self.reasons = reasons; self.message = message
+    public init(state: State, reasons: [String], message: String, defaults: Queue.Defaults = .init()) {
+        self.state = state; self.reasons = reasons; self.message = message; self.defaults = defaults
     }
 
     public var holdingNewJobs: Bool { reasons.contains("hold-new-jobs") }
@@ -59,20 +60,36 @@ public struct PrinterStatus: Equatable, Sendable {
 public enum Cups {
     static let printerURI = "ipp://localhost/printers/\(Driver.queue)"
 
-    /// nil when the queue does not exist.
+    /// nil when the queue does not exist. Also returns the queue defaults:
+    /// cupsd reports every option set with `lpadmin -o X-default=` as an
+    /// X-default attribute; an absent one means the PPD default, which is what
+    /// Queue.Defaults() holds. Cheaper than running lpoptions.
     public static func printer() -> PrinterStatus? {
-        guard let a = request(IPP_OP_GET_PRINTER_ATTRIBUTES).first(where: { _ in true }) else { return nil }
+        guard let a = request(IPP_OP_GET_PRINTER_ATTRIBUTES, { req in
+            addKeywords(req, "requested-attributes", ["printer-state", "printer-state-reasons", "printer-state-message",
+                                                      "PageSize-default", "MediaType-default", "Density-default",
+                                                      "TonerSave-default"])
+        }).first else { return nil }
+        var d = Queue.Defaults()
+        d.paper = a.string("PageSize-default") ?? d.paper
+        d.mediaType = a.string("MediaType-default") ?? d.mediaType
+        d.density = a.string("Density-default") ?? d.density
+        d.tonerSave = a.int("TonerSave-default").map { $0 != 0 } ?? d.tonerSave
         return PrinterStatus(
             state: PrinterStatus.State(rawValue: a.int("printer-state") ?? 3) ?? .idle,
             reasons: a.strings["printer-state-reasons"] ?? [],
-            message: a.string("printer-state-message") ?? "")
+            message: a.string("printer-state-message") ?? "",
+            defaults: d)
     }
 
     public static func jobs(completed: Bool) -> [Job] {
         request(IPP_OP_GET_JOBS) { req in
             ippAddString(req, IPP_TAG_OPERATION, IPP_TAG_KEYWORD, "which-jobs", nil,
                          completed ? "completed" : "not-completed")
-            ippAddString(req, IPP_TAG_OPERATION, IPP_TAG_KEYWORD, "requested-attributes", nil, "all")
+            // Only what PrinterBar shows. "all" makes cupsd load every job's
+            // attributes from disk: ~130 ms with a 500-job history vs ~17 ms.
+            addKeywords(req, "requested-attributes", ["job-id", "job-name", "job-state", "job-state-reasons",
+                                                      "job-media-sheets-completed", "time-at-creation", "time-at-completed"])
         }.compactMap { a in
             guard let id = a.int("job-id") else { return nil }
             return Job(
