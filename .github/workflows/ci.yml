@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  driver:
+  build:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v5
@@ -39,6 +39,15 @@ jobs:
           cupstestppd -W translations "$PPD"
           lpstat -p HP_LaserJet_P1102
           PPD=$PPD driver/test/check.sh
+
+      - name: PrinterBar tests against the installed queue
+        run: make app-test
+
+      - name: Build PrinterBar.app and render every screen
+        run: |
+          make screens
+          test -x build/PrinterBar.app/Contents/MacOS/PrinterBar
+          ls docs/screens/*.png | wc -l | grep -qx ' *16'
 
       - name: Uninstall
         run: |

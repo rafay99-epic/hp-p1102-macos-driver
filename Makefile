@@ -1,11 +1,9 @@
-# HP LaserJet P1102 driver for macOS. Run `make help` for targets.
+# HP LaserJet P1102 driver and PrinterBar for macOS. Run `make help` for targets.
 
 PREFIX   := /Library/Printers/HP-P1102
 PPD_DIR  := /Library/Printers/PPDs/Contents/Resources
 PPD      := HP-LaserJet-P1102.ppd
 QUEUE    := HP_LaserJet_P1102
-# No serial number, so the queue matches any P1102 and can be created unplugged.
-URI      := usb://Hewlett-Packard/HP%20LaserJet%20Professional%20P1102
 
 ARCHS    := -arch arm64 -arch x86_64
 CC       := clang
@@ -13,8 +11,10 @@ CFLAGS   := -O2 -Wall -Wextra -Werror -Wno-deprecated-declarations $(ARCHS)
 FOO2     := vendor/foo2zjs
 FOO2SRC  := $(FOO2)/foo2zjs.c $(FOO2)/jbig.c $(FOO2)/jbig_ar.c
 B        := build
+APP      := $(B)/PrinterBar.app
+SWIFTFLAGS := -c release --arch arm64 --arch x86_64 --package-path app
 
-.PHONY: all help test analyze install uninstall print-test clean
+.PHONY: all help test analyze install uninstall print-test app app-test install-app screens clean
 
 all: $(B)/foo2zjs $(B)/rastertozjs ## Build universal (arm64 + x86_64) binaries
 
@@ -48,13 +48,7 @@ analyze: ## Run the clang static analyzer on the filter
 	$(CC) --analyze -Xclang -analyzer-werror -Wno-deprecated-declarations driver/src/rastertozjs.c -o /dev/null
 
 install: all ## Install the driver and create the print queue (sudo)
-	install -d -o root -g wheel -m 755 $(PREFIX)/bin $(PREFIX)/filter $(PPD_DIR)
-	install -o root -g wheel -m 755 $(B)/foo2zjs $(PREFIX)/bin/foo2zjs
-	install -o root -g wheel -m 755 $(B)/rastertozjs $(PREFIX)/filter/rastertozjs
-	install -o root -g wheel -m 644 driver/ppd/$(PPD) $(PPD_DIR)/$(PPD)
-	lpadmin -p $(QUEUE) -E -v '$(URI)' -P $(PPD_DIR)/$(PPD) \
-		-D 'HP LaserJet P1102' -o printer-is-shared=false
-	@echo "Installed. Print to '$(QUEUE)' from any app."
+	driver/install.sh $(B)/foo2zjs $(B)/rastertozjs driver/ppd/$(PPD)
 
 uninstall: ## Remove the print queue and driver (sudo)
 	-lpadmin -x $(QUEUE)
@@ -66,5 +60,25 @@ print-test: ## Print an A4 test page on the installed queue
 	swift tools/testpage.swift $(B)/testpage.pdf A4
 	lp -d $(QUEUE) $(B)/testpage.pdf
 
+app: all ## Build PrinterBar.app, the menu bar app (bundles the driver)
+	swift build $(SWIFTFLAGS)
+	rm -rf $(APP) && mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Resources/driver
+	cp "$$(swift build $(SWIFTFLAGS) --show-bin-path)/PrinterBar" $(APP)/Contents/MacOS/
+	cp app/Info.plist $(APP)/Contents/
+	cp $(B)/foo2zjs $(B)/rastertozjs driver/ppd/$(PPD) driver/install.sh $(APP)/Contents/Resources/driver/
+	for s in A4 Letter Legal; do swift tools/testpage.swift $(APP)/Contents/Resources/testpage-$$s.pdf $$s > /dev/null; done
+	codesign --force --sign - $(APP)
+
+app-test: ## Run PrinterBar unit tests
+	swift test --package-path app
+
+install-app: app ## Copy PrinterBar.app to /Applications and open it
+	rm -rf /Applications/PrinterBar.app
+	cp -R $(APP) /Applications/
+	open /Applications/PrinterBar.app
+
+screens: app ## Render every PrinterBar screen to docs/screens
+	$(APP)/Contents/MacOS/PrinterBar --render-screens $(CURDIR)/docs/screens
+
 clean: ## Remove build output
-	rm -rf $(B)
+	rm -rf $(B) app/.build

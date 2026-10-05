@@ -32,8 +32,7 @@ ctx.strokePath()
 
 var y = H - 70
 text("HP LaserJet P1102 on macOS, \(name)", 40, y, size: 24, bold: true); y -= 22
-text("Quartz cgpdftoraster -> rastertozjs -> foo2zjs -z2 -> USB", 40, y, size: 11); y -= 14
-text("Printed \(Date())", 40, y, size: 9); y -= 30
+text("Quartz cgpdftoraster -> rastertozjs -> foo2zjs -z2 -> USB", 40, y, size: 11); y -= 44
 
 for size in [6, 8, 10, 12, 16, 22] as [CGFloat] {
     text("\(Int(size))pt  The quick brown fox jumps over the lazy dog 0123456789", 40, y, size: size)
