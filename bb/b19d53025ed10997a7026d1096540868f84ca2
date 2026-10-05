@@ -1,0 +1,50 @@
+app/Sources/PrinterBar/Views/Screens.swift
+  s_cbf8ffee023647::t_ca6daec8e07956 142,158,161
+  s_cbf8ffee023647::t_ae038cb8974635 140-141
+tools/perf/perf.sh
+  s_cbf8ffee023647::t_979c13b421e4d9 43,47,59,75
+  s_cbf8ffee023647::t_f4e763cf384b28 39,76
+Makefile
+  s_cbf8ffee023647::t_67ef2b2d0a7d91 17,83-90
+  s_cbf8ffee023647::t_ec9ef470f3fab1 91
+app/Sources/PrinterBar/Device.swift
+  s_cbf8ffee023647::t_70fdf8803ac6fb 4-15
+app/Tests/PrinterBarKitTests/LiveQueueTests.swift
+  s_cbf8ffee023647::t_029942e26c4cfb 37-38,44
+app/Sources/PrinterBar/Icons.swift
+  s_cbf8ffee023647::t_3f4ebeb2ac2f54 8-12,15,23
+app/Sources/PrinterBar/AppDelegate.swift
+  s_cbf8ffee023647::t_ae038cb8974635 54-60,74
+  s_cbf8ffee023647::t_70fdf8803ac6fb 68
+  s_cbf8ffee023647::t_3f4ebeb2ac2f54 38-42
+app/Sources/PrinterBarKit/Queue.swift
+  s_cbf8ffee023647::t_029942e26c4cfb 1,39-42
+app/Sources/PrinterBar/Model.swift
+  s_cbf8ffee023647::t_3f4ebeb2ac2f54 201-206,211,213
+  s_cbf8ffee023647::t_70fdf8803ac6fb 123-126,134-137,148,164-170,172-186,189-193,195-198,200,209-210,212,214-219,228-238,251-252,254-256,259-266,269,271-272,305,315-317,320,322,330,338,362
+  s_cbf8ffee023647::t_029942e26c4cfb 208
+  s_cbf8ffee023647::t_198ade304c1d48 171
+app/Sources/PrinterBarKit/Cups.swift
+  s_cbf8ffee023647::t_05da636a182b61 68,72,89-92
+  s_cbf8ffee023647::t_029942e26c4cfb 40,42-43,63-66,69-71,73-77,81-82
+tools/perf/lifecycle.sh
+  s_cbf8ffee023647::t_91202caadc72ad 1-47
+README.md
+  s_cbf8ffee023647::t_67ef2b2d0a7d91 121-123,146-190,226
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bbb19d53025ed10997a7026d1096540868f84ca2",
+  "prompts": {},
+  "sessions": {
+    "s_cbf8ffee023647": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d469a7eb-65b0-49bf-9c66-337dbf40ed8e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Abdul Rafay <99marafay@gmail.com>"
+    }
+  }
+}
