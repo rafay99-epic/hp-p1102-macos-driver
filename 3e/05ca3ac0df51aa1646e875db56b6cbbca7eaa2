@@ -1,0 +1,83 @@
+README.md
+  s_cbf8ffee023647::t_2f986dcb84d1eb 6-7,9-11,13-17,23-25,28-30,36-37,41-43,45-46,48,50-52,61-105,111-113,115,117-120,123-142,146-147,150-152,172-175,180-183
+app/Sources/PrinterBarKit/Duplex.swift
+  s_cbf8ffee023647::t_c15837c9cb0d04 1-99
+app/Info.plist
+  s_cbf8ffee023647::t_c5a8ecd5aedb4a 1-28
+app/Sources/PrinterBar/Views/Ledger.swift
+  s_cbf8ffee023647::t_f9d4c6aab1e4bd 60,95
+  s_cbf8ffee023647::t_9731825c9297f3 74,76
+  s_cbf8ffee023647::t_6f47cd225aaa90 1-59,61-73,75,77-94,96-177
+app/Sources/PrinterBar/Snapshots.swift
+  s_cbf8ffee023647::t_d03d4b33643ce4 33
+  s_cbf8ffee023647::t_66c9cc2558f7f2 1-32,34-66
+app/Sources/PrinterBar/Views/Screens.swift
+  s_cbf8ffee023647::t_c2e09267d0f969 1-46,48-104,106-111,119-128,130-212,214-261
+  s_cbf8ffee023647::t_17479b31361523 47,213
+  s_cbf8ffee023647::t_75310381ab9c99 105,112-118
+  s_cbf8ffee023647::t_d3719122721534 129
+app/Sources/PrinterBarKit/Cups.swift
+  s_cbf8ffee023647::t_8eef592ab02d93 180
+  s_cbf8ffee023647::t_17479b31361523 25-29,39-42
+  s_cbf8ffee023647::t_fb905949969b18 1-24,30-38,43-179,181-182
+app/Sources/CCups/module.modulemap
+  s_cbf8ffee023647::t_9d8ea5aa203bb8 1-5
+app/Sources/PrinterBar/AppDelegate.swift
+  s_cbf8ffee023647::t_b287f5b3bec53b 1-85
+driver/install.sh
+  s_cbf8ffee023647::t_a83d1d5bb431d4 1-20
+.github/workflows/ci.yml
+  s_cbf8ffee023647::t_facddba5c4a941 12,43-50
+  s_cbf8ffee023647::t_72e307714cd59d 51
+app/Tests/PrinterBarKitTests/LiveQueueTests.swift
+  s_cbf8ffee023647::t_9c0e07ce5fbacd 1-4,7-8,10-51
+  s_cbf8ffee023647::t_404084c815e73e 5-6,9
+app/Sources/PrinterBar/Model.swift
+  s_cbf8ffee023647::t_d03d4b33643ce4 31,123-126,142,177-178,279,324,336
+  s_cbf8ffee023647::t_17479b31361523 78,313-315,319
+  s_cbf8ffee023647::t_34a716f5832c35 1-30,32-77,79-122,127-141,143-176,179-278,280-312,316-318,320-323,325-335,337-376,384-386
+  s_cbf8ffee023647::t_d71f56494edf38 377-383
+Makefile
+  s_cbf8ffee023647::t_283415cdb9bc57 15,64,66
+  s_cbf8ffee023647::t_db5e07e648bf33 51
+  s_cbf8ffee023647::t_1dd6f835b5e5ad 1,14,17,63,65,67-82,84
+app/Sources/PrinterBar/Icons.swift
+  s_cbf8ffee023647::t_e49aa506d5cf8f 1-58
+app/Sources/PrinterBar/Device.swift
+  s_cbf8ffee023647::t_014c93940003cd 1-110
+app/Package.swift
+  s_cbf8ffee023647::t_b9f7a61446dbba 1-14
+app/Sources/PrinterBar/Views/MainView.swift
+  s_cbf8ffee023647::t_91593f00d02a6f 1-205
+app/Sources/CCups/shim.h
+  s_cbf8ffee023647::t_9d8ea5aa203bb8 1
+app/Sources/PrinterBarKit/Queue.swift
+  s_cbf8ffee023647::t_7fdfa60582344e 1-90
+app/Sources/PrinterBar/main.swift
+  s_cbf8ffee023647::t_f462c4106f74ae 1-27
+app/Sources/PrinterBar/Setup.swift
+  s_cbf8ffee023647::t_17479b31361523 9
+  s_cbf8ffee023647::t_de83de0e5a6375 1-8,10-61
+tools/testpage.swift
+  s_cbf8ffee023647::t_1dd6f835b5e5ad 35
+.gitignore
+  s_cbf8ffee023647::t_e5308813fbeb0e 3-4
+app/Tests/PrinterBarKitTests/PrinterBarKitTests.swift
+  s_cbf8ffee023647::t_c2977d3d01e4f0 1-64
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3e05ca3ac0df51aa1646e875db56b6cbbca7eaa2",
+  "prompts": {},
+  "sessions": {
+    "s_cbf8ffee023647": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d469a7eb-65b0-49bf-9c66-337dbf40ed8e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Abdul Rafay <99marafay@gmail.com>"
+    }
+  }
+}
