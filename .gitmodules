@@ -1,0 +1,3 @@
+[submodule "vendor/foo2zjs"]
+	path = vendor/foo2zjs
+	url = https://github.com/OpenPrinting/foo2zjs
