@@ -1,0 +1,35 @@
+driver/src/rastertozjs.c
+  s_cbf8ffee023647::t_993021f4ef1dd7 1-201
+tools/testpage.swift
+  s_cbf8ffee023647::t_993021f4ef1dd7 1-2,7-12,18,34
+tools/pbm2png.py
+  s_cbf8ffee023647::t_993021f4ef1dd7 1
+.github/workflows/ci.yml
+  s_cbf8ffee023647::t_167b6089729c6c 1-54
+.gitignore
+  s_cbf8ffee023647::t_9ee3b234aafb49 2
+driver/test/check.sh
+  s_cbf8ffee023647::t_0e4cc1f3eb1c95 1-59
+.github/dependabot.yml
+  s_cbf8ffee023647::t_33b070ff695f05 1-12
+Makefile
+  s_cbf8ffee023647::t_3c26e1d8207cd0 1-70
+README.md
+  s_cbf8ffee023647::t_70c0d3f2dd37ea 1,3-18,21-54,57-58,60-97,100-103,106-130,132-133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2f11aff29968f831e659ca30ef2c007bb72fd622",
+  "prompts": {},
+  "sessions": {
+    "s_cbf8ffee023647": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d469a7eb-65b0-49bf-9c66-337dbf40ed8e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Abdul Rafay <99marafay@gmail.com>"
+    }
+  }
+}
